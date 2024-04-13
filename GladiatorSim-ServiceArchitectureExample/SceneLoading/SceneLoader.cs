@@ -10,22 +10,19 @@ namespace _Scripts.CodeBase.Infrastructure.SceneLoading
     {
         private readonly ICoroutineRunner _coroutineRunner;
         private readonly SceneLoaderReferencesSO _sceneLoaderReferencesSO;
-        private readonly IProgressCurtain _progressCurtain;
+        private readonly IGameLoadCurtain _gameLoadProgressCurtain;
+        private readonly ISceneLoadingCurtain _sceneLoadingCurtain;
 
         public SceneLoader(ICoroutineRunner coroutineRunner, SceneLoaderReferencesSO sceneLoaderReferencesSO,
-            IProgressCurtain progressCurtain)
+            IGameLoadCurtain gameLoadProgressCurtain, ISceneLoadingCurtain sceneLoadingCurtain)
         {
             _coroutineRunner = coroutineRunner;
             _sceneLoaderReferencesSO = sceneLoaderReferencesSO;
-            _progressCurtain = progressCurtain;
+            _gameLoadProgressCurtain = gameLoadProgressCurtain;
+            _sceneLoadingCurtain = sceneLoadingCurtain;
         }
 
-        private void Load(string name, Action onLoaded = null)
-        {
-            _coroutineRunner.StartCoroutine(LoadScene(name, onLoaded));
-        }
-
-        public void Load(SceneType type, Action onLoaded = null)
+        public void Load(SceneType type, Action onLoaded = null, Action allowSceneActivation = null)
         {
             if (type == SceneType.None)
             {
@@ -38,10 +35,15 @@ namespace _Scripts.CodeBase.Infrastructure.SceneLoading
             }
 
             var scene = _sceneLoaderReferencesSO.Scenes[type];
-            Load(scene.ScenePath, onLoaded);
+            Load(scene.ScenePath, onLoaded, allowSceneActivation);
         }
 
-        private IEnumerator LoadScene(string nextScene, Action onLoaded = null)
+        private void Load(string name, Action onLoaded = null, Action allowSceneActivation = null)
+        {
+            _coroutineRunner.StartCoroutine(LoadScene(name, onLoaded, allowSceneActivation));
+        }
+
+        private IEnumerator LoadScene(string nextScene, Action onLoaded = null, Action allowSceneActivation = null)
         {
             if (SceneManager.GetActiveScene().name == nextScene)
             {
@@ -51,12 +53,24 @@ namespace _Scripts.CodeBase.Infrastructure.SceneLoading
 
             AsyncOperation waitNextScene = SceneManager.LoadSceneAsync(nextScene);
 
+
+            if (allowSceneActivation != null)
+            {
+                waitNextScene.allowSceneActivation = false;
+                allowSceneActivation += () => waitNextScene.allowSceneActivation = true;
+            }
+
             while (!waitNextScene.isDone)
             {
-                _progressCurtain.SetProgress(waitNextScene.progress);
+#if UNITY_EDITOR
+                //Debug.Log("<color=green>Loading progress: " + waitNextScene.progress + "</color>");
+#endif
+                _gameLoadProgressCurtain.SetProgress(waitNextScene.progress);
+                _sceneLoadingCurtain.SetProgress(waitNextScene.progress);
                 yield return null;
             }
 
+            _gameLoadProgressCurtain.SetProgress(1f);
             onLoaded?.Invoke();
         }
     }

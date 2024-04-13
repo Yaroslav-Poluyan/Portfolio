@@ -1,12 +1,18 @@
-﻿using _Scripts.CodeBase.Infrastructure.AssetManagement;
-using _Scripts.CodeBase.Infrastructure.Factory;
+﻿using System.Threading.Tasks;
+using _Scripts.CodeBase.Gameplay.GameSettings;
+using _Scripts.CodeBase.Infrastructure.AssetManagement;
+using _Scripts.CodeBase.Infrastructure.Factory.Game;
+using _Scripts.CodeBase.Infrastructure.Factory.InfrastructureFactories;
+using _Scripts.CodeBase.Infrastructure.Factory.UIFactory;
+using _Scripts.CodeBase.Infrastructure.LevelContextManagers;
 using _Scripts.CodeBase.Infrastructure.SceneLoading;
 using _Scripts.CodeBase.Infrastructure.StateMachine;
+using _Scripts.CodeBase.Infrastructure.StateMachine.States;
+using _Scripts.CodeBase.Services;
 using _Scripts.CodeBase.Services.Curtain;
 using _Scripts.CodeBase.Services.Input;
-using _Scripts.CodeBase.Services.SaveLoad;
 using _Scripts.CodeBase.StaticData;
-using CodeBase.Services.SaveLoad;
+using _Scripts.CodeBase.StaticData.PlayerProgressData;
 using UnityEngine;
 using Zenject;
 
@@ -18,35 +24,67 @@ namespace _Scripts.CodeBase.Infrastructure
     {
         private Game _game;
 
-        public override void InstallBindings()
+        public override async void InstallBindings()
         {
+            BindInfrastructureFactory();
             BindCoroutineRunner();
             BindAssetProvider();
             BindStaticDataService();
-            BindContainerProgressWriter();
-            BindProgressCurtain();
-            BindSceneReferencesSO();
+            BindPlayerProgressData();
+            BindGameSettings();
+            await BindLoadingSceneCurtain();
+            await BindGameLoadCurtain();
+            await BindSceneReferencesSO();
             BindSceneLoader();
             BindInputService();
+            BindLevelController();
             BindGameFactory();
+            BindUIFactory();
+            BindTimeManager();
+            _game = new Game(Container.Resolve<IInfrastructureFactory>());
+            BindGameStateMachine();
             BindGame();
+            EnterToBootstrapState();
         }
 
         public override void Start()
         {
-            EnterToBootstrapState();
+        }
+
+        private void BindTimeManager()
+        {
+            Container.Bind<TimeManagerService>()
+                .AsSingle()
+                .NonLazy();
+        }
+
+        private void BindGameSettings()
+        {
+            Container.Bind<GameSettings>().To<GameSettings>()
+                .AsSingle()
+                .NonLazy();
+        }
+
+        private void BindPlayerProgressData()
+        {
+            Container.Bind<PlayerProgressData>()
+                .AsSingle()
+                .NonLazy();
         }
 
         private void EnterToBootstrapState()
         {
-            _game = Container.Resolve<Game>();
-            InitGame();
+            _game.StateMachine.Enter<BootstrapState>();
         }
 
-        private void InitGame()
-        {
-            _game.stateMachine.Enter<BootstrapState>();
-        }
+        private void BindInfrastructureFactory() => Container.Bind<IInfrastructureFactory>()
+            .To<InfrastructureFactory>()
+            .AsSingle()
+            .NonLazy();
+
+        private void BindGameStateMachine() => Container.Bind<GameStateMachine>()
+            .FromInstance(_game.StateMachine)
+            .AsSingle();
 
         private void BindCoroutineRunner() => Container.Bind<ICoroutineRunner>()
             .FromInstance(this)
@@ -58,23 +96,20 @@ namespace _Scripts.CodeBase.Infrastructure
             .AsSingle()
             .NonLazy();
 
-        private void BindContainerProgressWriter() =>
-            Container.Bind<IContainerProgressWriter>()
-                .To<SaveLoadContainer>()
-                .AsSingle()
-                .NonLazy();
-
         private void BindStaticDataService() =>
             Container.Bind<IStaticDataService>()
                 .To<StaticDataService>()
                 .AsSingle()
                 .NonLazy();
 
-        private void BindSceneReferencesSO() =>
+        private async Task BindSceneReferencesSO()
+        {
+            var sceneLoaderReferencesSO = await LoadSceneLoaderReferencesSO(Container);
             Container.Bind<SceneLoaderReferencesSO>()
-                .FromMethod(LoadSceneLoaderReferencesSO)
+                .FromInstance(sceneLoaderReferencesSO)
                 .AsSingle()
                 .NonLazy();
+        }
 
         private void BindSceneLoader() => Container.Bind<ISceneLoader>()
             .To<SceneLoader>()
@@ -82,7 +117,6 @@ namespace _Scripts.CodeBase.Infrastructure
             .NonLazy();
 
         private void BindGame() => Container.Bind<Game>()
-            .To<Game>()
             .AsSingle()
             .NonLazy();
 
@@ -92,20 +126,54 @@ namespace _Scripts.CodeBase.Infrastructure
                 .AsSingle()
                 .NonLazy();
 
-        private void BindProgressCurtain() => Container.Bind<IProgressCurtain>()
-            .FromMethod(CreateLoadingCurtain)
-            .AsSingle()
-            .NonLazy();
+        private void BindUIFactory() =>
+            Container.Bind<IUIFactory>()
+                .To<UIFactory>()
+                .AsSingle()
+                .NonLazy();
 
-        private LoadingCurtain CreateLoadingCurtain(InjectContext context)
+        private async Task BindGameLoadCurtain()
         {
-            var assetProvider = context.Container.Resolve<IAssetProvider>();
-            return Instantiate(assetProvider.LoadAs<LoadingCurtain>(AssetsPaths.LoadingCurtain));
+            var curtain = await CreateLoadingGameCurtain(Container);
+            Container.Bind<IGameLoadCurtain>()
+                .FromInstance(curtain)
+                .AsSingle()
+                .NonLazy();
         }
 
-        private SceneLoaderReferencesSO LoadSceneLoaderReferencesSO(InjectContext context) =>
-            context.Container.Resolve<IAssetProvider>()
+        private async Task BindLoadingSceneCurtain()
+        {
+            var curtain = await CreateLoadingSceneCurtain(Container);
+            Container.Bind<ISceneLoadingCurtain>()
+                .FromInstance(curtain)
+                .AsSingle()
+                .NonLazy();
+        }
+
+        private async Task<LoadingGameCurtain> CreateLoadingGameCurtain(DiContainer container)
+        {
+            var assetProvider = container.Resolve<IAssetProvider>();
+            var prefab = await assetProvider.LoadAs<LoadingGameCurtain>(AssetsPaths.LoadingGameCurtain);
+            var loadingCurtain = Instantiate(prefab);
+            loadingCurtain.HideForce();
+            return loadingCurtain;
+        }
+
+        private async Task<LoadingSceneCurtain> CreateLoadingSceneCurtain(DiContainer container)
+        {
+            var assetProvider = container.Resolve<IAssetProvider>();
+            var prefab = await assetProvider.LoadAs<LoadingSceneCurtain>(AssetsPaths.LoadingSceneCurtain);
+            var loadingCurtain = Instantiate(prefab);
+            loadingCurtain.HideForce();
+            return loadingCurtain;
+        }
+
+        private async Task<SceneLoaderReferencesSO> LoadSceneLoaderReferencesSO(DiContainer container)
+        {
+            var so = await container.Resolve<IAssetProvider>()
                 .LoadAs<SceneLoaderReferencesSO>(AssetsPaths.SceneReferencesSO);
+            return so;
+        }
 
         private void BindInputService()
         {
@@ -115,21 +183,24 @@ namespace _Scripts.CodeBase.Infrastructure
                 .NonLazy();
         }
 
-        private static IInputService RegisterInputService()
+        private void BindLevelController()
         {
-            if (Application.isEditor)
-            {
-                //check is gamepad connected
-                return new PlayStationInputService();
-            }
+            Container.Bind<LevelController>()
+                .To<LevelController>()
+                .AsSingle()
+                .NonLazy();
+        }
 
+        private IInputService RegisterInputService()
+        {
             if (Application.platform == RuntimePlatform.PS4)
             {
-                return new PlayStationInputService();
+                //create new class via zenject
+                return Container.Instantiate<PlayStationInputServiceBase>();
             }
 
-            Debug.LogError("Unknown platform");
-            return new StandaloneInputService();
+            Debug.LogWarning("Unknown platform. Setting inputs to defaults: PlayStationInputServiceBase");
+            return Container.Instantiate<PlayStationInputServiceBase>();
         }
     }
 }

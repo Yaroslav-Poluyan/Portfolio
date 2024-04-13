@@ -1,42 +1,61 @@
-﻿using _Scripts.CodeBase.Infrastructure.SceneLoading;
-using _Scripts.CodeBase.Services.Input;
+﻿using System.Threading.Tasks;
+using _Scripts.CodeBase.Gameplay.Scenes.BattleChoose.UI;
+using _Scripts.CodeBase.Infrastructure.SceneLoading;
+using _Scripts.CodeBase.Infrastructure.StateMachine.States.Common;
 using _Scripts.CodeBase.StaticData;
-using UnityEngine;
+using _Scripts.CodeBase.StaticData.PlayerProgressData;
 
-namespace _Scripts.CodeBase.Infrastructure.StateMachine
+#if UNITY_EDITOR
+using _Scripts.CodeBase.Technical.EditorUnilities;
+#endif
+
+namespace _Scripts.CodeBase.Infrastructure.StateMachine.States
 {
-    public class BootstrapState : IState
+    public class BootstrapState : ExitableStateBase, IState
     {
         private const SceneType Bootstrapper = SceneType.Bootstrapper;
         private readonly GameStateMachine _stateMachine;
         private readonly ISceneLoader _sceneLoader;
         private readonly IStaticDataService _staticData;
+        private readonly PlayerProgressData _playerProgressData;
 
-        public BootstrapState(GameStateMachine stateMachine, ISceneLoader sceneLoader, IStaticDataService staticData)
+        public BootstrapState(GameStateMachine stateMachine, ISceneLoader sceneLoader, IStaticDataService staticData,
+            PlayerProgressData playerProgressData) :
+            base(stateMachine)
         {
             _stateMachine = stateMachine;
             _sceneLoader = sceneLoader;
             _staticData = staticData;
+            _playerProgressData = playerProgressData;
             LoadData();
         }
 
         public void Enter()
         {
-            _sceneLoader.Load(Bootstrapper, onLoaded: EnterLoadLevel);
+            _sceneLoader.Load(Bootstrapper, onLoaded: EnterDisclaimerState);
         }
 
-        public void Exit()
+        private void EnterDisclaimerState()
         {
+#if UNITY_EDITOR
+            if (SkipStatesHelper.SkipUIMenusStates)
+            {
+                var debugBattlePreset = new ChooseBattlePanel.BattlePreset
+                {
+                    _battleType = ChooseBattlePanel.BattlePreset.BattleType.OneVsAll
+                };
+                _stateMachine.Enter<LoadLevelState,
+                    (SceneType, ChooseBattlePanel.BattlePreset)>((SceneType.Arena4, debugBattlePreset));
+                return;
+            }
+#endif
+            _stateMachine.Enter<DisclaimerState>();
         }
 
-        private void EnterLoadLevel()
+        private async Task LoadData()
         {
-            _stateMachine.Enter<LoadLevelState, SceneType>(SceneType.Game);
-        }
-
-        private void LoadData()
-        {
-            _staticData.Load();
+            await _staticData.Load();
+            _playerProgressData.LoadAll();
         }
     }
 }

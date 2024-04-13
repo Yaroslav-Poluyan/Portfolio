@@ -18,6 +18,16 @@ namespace _Scripts.CodeBase.Infrastructure.SceneLoading
         Bootstrapper = 1,
         InitialLoading = 2,
         MainMenu = 3,
-        Game = 4,
+        Settings = 5,
+        Camp = 6,
+        GladiatorChoose = 8,
+        BattleChoose = 9,
+        AbilityChoose = 10,
+        GladiatorForBattleChoose = 11,
+        Arena1 = 21,
+        Arena2 = 22,
+        Arena3 = 23,
+        Arena4 = 24,
+        Arena5 = 25,
     }
 }

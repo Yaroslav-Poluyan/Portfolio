@@ -1,35 +1,61 @@
+using System.Collections.Generic;
+using System.Linq;
 using System.Threading.Tasks;
+using JetBrains.Annotations;
+using Unity.VisualScripting;
 using UnityEngine;
 using UnityEngine.AddressableAssets;
+using UnityEngine.ResourceManagement.AsyncOperations;
 
 namespace _Scripts.CodeBase.Infrastructure.AssetManagement
 {
     public class AssetProvider : IAssetProvider
     {
-        public GameObject Load(string assetPath)
+        public async Task<GameObject> Load(string assetPath)
         {
-            return Resources.Load<GameObject>(assetPath);
+            var handle = Addressables.LoadAssetAsync<GameObject>(assetPath);
+            await handle.Task;
+            return handle.Result;
         }
 
-        public TValue LoadAs<TValue>(string assetPath) where TValue : Object
+        public async Task<TValue> LoadAs<TValue>(string assetPath) where TValue : Object
         {
-            if (Resources.Load<TValue>(assetPath) == null)
+            if (assetPath.EndsWith(".prefab"))
             {
-                Debug.LogError($"No such asset at path: {assetPath}");
+                var handle = Addressables.LoadAssetAsync<GameObject>(assetPath);
+                await handle.Task;
+
+                if (handle.Result == null)
+                {
+                    Debug.LogError($"No such asset at path: {assetPath}");
+                }
+
+                if (typeof(TValue) != typeof(GameObject)) return handle.Result.GetComponent<TValue>();
+                return handle.Result as TValue;
             }
 
-            return Resources.Load<TValue>(assetPath);
+            if (assetPath.EndsWith(".asset"))
+            {
+                var handle = Addressables.LoadAssetAsync<ScriptableObject>(assetPath);
+                await handle.Task;
+
+                if (handle.Result == null)
+                {
+                    Debug.LogError($"No such asset at path: {assetPath}");
+                }
+
+                return handle.Result as TValue;
+            }
+
+            Debug.LogError($"Unsupported asset type at path: {assetPath}");
+            return null;
         }
 
-        public TValue[] LoadAll<TValue>(string assetsPath) where TValue : Object
+        public async Task<TValue[]> LoadAll<TValue>(string assetsPath)
         {
-            return Resources.LoadAll<TValue>(assetsPath);
+            var handle = Addressables.LoadAssetsAsync<TValue>(assetsPath, null);
+            await handle.Task;
+            return handle.Result.ToArray();
         }
-
-        public Task<GameObject> Instantiate(string address, Vector3 at) =>
-            Addressables.InstantiateAsync(address, at, Quaternion.identity).Task;
-
-        public Task<GameObject> Instantiate(string address) =>
-            Addressables.InstantiateAsync(address).Task;
     }
 }
